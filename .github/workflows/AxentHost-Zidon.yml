@@ -3,7 +3,7 @@ name: AxentHost Auto Claim Zidong v2
 on:
   # 测试用，每 5 分钟触发一次
   schedule:
-    - cron: "48 * * * *"
+    - cron: "51 * * * *"
   # 手动触发
   workflow_dispatch:
 
