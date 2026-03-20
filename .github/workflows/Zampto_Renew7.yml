@@ -1,0 +1,166 @@
+name: Zampto Auto Renew (Pro)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 3,15 * * *"  # UTC -> 北京时间 11:45 / 23:45
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zampto-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PROJECT_DIR: zampto
+      SCRIPT_NAME: Zampto_Renew7.py
+      SCRIPT_DESC: Zampto 续期脚本
+
+    steps:
+      # =========================
+      # 📥 1️⃣ 检出当前仓库
+      # =========================
+      - name: 📥 检出当前仓库
+        uses: actions/checkout@v4
+
+      # =========================
+      # 🔐 2️⃣ 检出私有仓库
+      # =========================
+      - name: 🔐 检出私有仓库
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/zam-auto
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          ref: main
+          path: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+          fetch-depth: 1
+
+      # =========================
+      # 📁 3️⃣ 创建截图目录
+      # =========================
+      - name: 📁 创建截图目录
+        run: mkdir -p screenshots
+        working-directory: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+
+      # =========================
+      # 🐍 4️⃣ Python 环境
+      # =========================
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # =========================
+      # 📦 5️⃣ 系统依赖
+      # =========================
+      - name: 📦 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb unzip curl
+
+      # =========================
+      # 📚 6️⃣ Python 依赖
+      # =========================
+      - name: 📚 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0
+
+      # =========================
+      # 📡 7️⃣ 安装代理（Xray）
+      # =========================
+      - name: 📡 安装并启动代理
+        env:
+          PROXY_NODE: ${{ secrets.PROXY_NODE }}
+        run: |
+          if [ -z "$PROXY_NODE" ]; then
+            echo "[INFO] 未配置代理，直连模式"
+            exit 0
+          fi
+
+          wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -q Xray-linux-64.zip -d xray && chmod +x xray/xray
+
+          echo "[INFO] 解析节点..."
+          
+          python3 << 'PYEOF'
+# ======（这里保留你原来的完整 Python 解析代码，不动）======
+# 👉 你原来的那一大段 VLESS / VMESS / TROJAN / SS 代码直接复制 сюда
+PYEOF
+
+          # 启动 Xray
+          ./xray/xray run -c xray_config.json > xray.log 2>&1 &
+          sleep 5
+
+          for i in 1 2 3 4 5; do
+            if curl -x socks5://127.0.0.1:10808 -s --max-time 15 https://api.ipify.org > /dev/null 2>&1; then
+              echo "PROXY_SOCKS5=socks5://127.0.0.1:10808" >> $GITHUB_ENV
+              echo "[INFO] ✅ 代理连接成功"
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "[ERROR] ❌ 代理连接失败"
+          cat xray.log
+          exit 1
+
+      # =========================
+      # ⏳ 8️⃣ 随机延迟
+      # =========================
+      - name: ⏳ 随机延迟
+        run: |
+          delay=$((RANDOM % 120))
+          echo "延迟 ${delay}s"
+          sleep $delay
+
+      # =========================
+      # 🚀 9️⃣ 执行脚本（私库）
+      # =========================
+      - name: 🚀 执行续期脚本
+        env:
+          ZAMPTO_ACCOUNT: ${{ secrets.ZAMPTO_ACCOUNT }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SOCKS5: ${{ env.PROXY_SOCKS5 }}
+          SCREENSHOT_DIR: screenshots
+        run: xvfb-run -a python ${{ env.SCRIPT_NAME }}
+        working-directory: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+
+      # =========================
+      # 📸 🔟 上传截图
+      # =========================
+      - name: 📸 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zampto-screenshots-${{ github.run_id }}
+          path: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # =========================
+      # 🗑️ 11 清理截图
+      # =========================
+      - name: 🗑️ 清理截图
+        if: always()
+        run: |
+          rm -rf ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}/screenshots/*
+
+      # =========================
+      # 🧹 12 清理历史运行
+      # =========================
+      - name: 🧹 清理旧运行
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 1
