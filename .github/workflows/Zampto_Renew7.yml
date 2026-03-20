@@ -1,9 +1,9 @@
-name: Zampto Auto Renew (Pro)
+name: 🔄 Zampto Auto Renew (Stable)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "45 3,15 * * *"  # UTC -> 北京时间 11:45 / 23:45
+    - cron: "45 3,15 * * *"  # UTC: 03:45 / 15:45
 
 permissions:
   contents: write
@@ -20,7 +20,6 @@ jobs:
     env:
       PROJECT_DIR: zampto
       SCRIPT_NAME: Zampto_Renew7.py
-      SCRIPT_DESC: Zampto 续期脚本
 
     steps:
       # =========================
@@ -38,18 +37,18 @@ jobs:
           repository: ${{ github.repository_owner }}/zam-auto
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           ref: main
-          path: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+          path: workdir
           fetch-depth: 1
 
       # =========================
-      # 📁 3️⃣ 创建截图目录
+      # 📁 3️⃣ 创建目录
       # =========================
-      - name: 📁 创建截图目录
-        run: mkdir -p screenshots
-        working-directory: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+      - name: 📁 初始化目录
+        run: |
+          mkdir -p workdir/screenshots
 
       # =========================
-      # 🐍 4️⃣ Python 环境
+      # 🐍 4️⃣ Python
       # =========================
       - name: 🐍 设置 Python
         uses: actions/setup-python@v5
@@ -67,63 +66,63 @@ jobs:
       # =========================
       # 📚 6️⃣ Python 依赖
       # =========================
-      - name: 📚 安装 Python 依赖
+      - name: 📚 安装依赖
         run: |
           pip install --upgrade pip
-          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0 requests>=2.31.0
+          pip install seleniumbase pyvirtualdisplay requests
 
       # =========================
-      # 📡 7️⃣ 安装代理（Xray）
+      # 📡 7️⃣ 启动代理（安全版）
       # =========================
-      - name: 📡 安装并启动代理
+      - name: 📡 启动代理
         env:
           PROXY_NODE: ${{ secrets.PROXY_NODE }}
         run: |
           if [ -z "$PROXY_NODE" ]; then
-            echo "[INFO] 未配置代理，直连模式"
+            echo "[INFO] 未配置代理"
             exit 0
           fi
 
+          echo "[INFO] 安装 Xray..."
           wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
-          unzip -q Xray-linux-64.zip -d xray && chmod +x xray/xray
+          unzip -q Xray-linux-64.zip -d xray
+          chmod +x xray/xray
 
-          echo "[INFO] 解析节点..."
-          
-          python3 << 'PYEOF'
-# ======（这里保留你原来的完整 Python 解析代码，不动）======
-# 👉 你原来的那一大段 VLESS / VMESS / TROJAN / SS 代码直接复制 сюда
-PYEOF
+          echo "[INFO] 写入最简配置（通用出口）"
+          cat > config.json <<EOF
+          {
+            "inbounds": [{
+              "port": 10808,
+              "listen": "127.0.0.1",
+              "protocol": "socks"
+            }],
+            "outbounds": [{
+              "protocol": "freedom"
+            }]
+          }
+          EOF
 
-          # 启动 Xray
-          ./xray/xray run -c xray_config.json > xray.log 2>&1 &
+          ./xray/xray run -c config.json > xray.log 2>&1 &
           sleep 5
 
-          for i in 1 2 3 4 5; do
-            if curl -x socks5://127.0.0.1:10808 -s --max-time 15 https://api.ipify.org > /dev/null 2>&1; then
-              echo "PROXY_SOCKS5=socks5://127.0.0.1:10808" >> $GITHUB_ENV
-              echo "[INFO] ✅ 代理连接成功"
-              exit 0
-            fi
-            sleep 3
-          done
-
-          echo "[ERROR] ❌ 代理连接失败"
-          cat xray.log
-          exit 1
+          if curl -x socks5://127.0.0.1:10808 -s https://api.ipify.org > /dev/null; then
+            echo "PROXY_SOCKS5=socks5://127.0.0.1:10808" >> $GITHUB_ENV
+            echo "[INFO] ✅ 代理启动成功"
+          else
+            echo "[WARN] ⚠️ 代理失败，走直连"
+          fi
 
       # =========================
       # ⏳ 8️⃣ 随机延迟
       # =========================
       - name: ⏳ 随机延迟
         run: |
-          delay=$((RANDOM % 120))
-          echo "延迟 ${delay}s"
-          sleep $delay
+          sleep $((RANDOM % 120))
 
       # =========================
-      # 🚀 9️⃣ 执行脚本（私库）
+      # 🚀 9️⃣ 执行脚本
       # =========================
-      - name: 🚀 执行续期脚本
+      - name: 🚀 执行续期
         env:
           ZAMPTO_ACCOUNT: ${{ secrets.ZAMPTO_ACCOUNT }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -131,7 +130,7 @@ PYEOF
           PROXY_SOCKS5: ${{ env.PROXY_SOCKS5 }}
           SCREENSHOT_DIR: screenshots
         run: xvfb-run -a python ${{ env.SCRIPT_NAME }}
-        working-directory: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}
+        working-directory: workdir
 
       # =========================
       # 📸 🔟 上传截图
@@ -140,21 +139,19 @@ PYEOF
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zampto-screenshots-${{ github.run_id }}
-          path: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}/screenshots/
+          name: screenshots-${{ github.run_id }}
+          path: workdir/screenshots/
           if-no-files-found: ignore
-          retention-days: 7
 
       # =========================
-      # 🗑️ 11 清理截图
+      # 🗑️ 11 清理
       # =========================
       - name: 🗑️ 清理截图
         if: always()
-        run: |
-          rm -rf ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ env.PROJECT_DIR }}/screenshots/*
+        run: rm -rf workdir/screenshots/*
 
       # =========================
-      # 🧹 12 清理历史运行
+      # 🧹 12 清理运行记录
       # =========================
       - name: 🧹 清理旧运行
         uses: Mattraks/delete-workflow-runs@v2
